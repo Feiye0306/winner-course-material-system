@@ -6,12 +6,28 @@
   <title>贏家升大 - 講義送印、對帳與發放管理系統</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Vue 3 -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- Vue 3 (使用穩定之 cdnjs 來源) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <!-- SheetJS (xlsx) for Excel upload & reconciliation -->
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <!-- SheetJS (xlsx) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script>
+    // 全域錯誤捕獲：若有任何 CDN 或 JS 錯誤直接於畫面頂部呈現，杜絕白屏
+    window.addEventListener('error', function(e) {
+      console.error('全域錯誤:', e);
+      var errDiv = document.getElementById('global-error-display');
+      if (errDiv) {
+        errDiv.style.display = 'block';
+        errDiv.innerHTML = '<div style="background:#fee2e2;border:2px solid #ef4444;color:#991b1b;padding:16px;border-radius:12px;margin:20px;font-family:sans-serif;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">' +
+          '<h3 style="margin:0 0 8px 0;font-size:16px;font-weight:bold;">⚠️ 系統初始化異常提示：</h3>' +
+          '<p style="margin:0 0 8px 0;font-size:14px;">' + (e.message || '未知錯誤') + '</p>' +
+          '<small style="color:#b91c1c;font-family:monospace;">來源: ' + (e.filename || '頁面腳本') + ' 第 ' + e.lineno + ' 行</small><br>' +
+          '<button onclick="location.reload()" style="margin-top:12px;padding:8px 16px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">重新整理頁面</button>' +
+          '</div>';
+      }
+    });
+  </script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&display=swap');
     body {
@@ -28,6 +44,7 @@
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div id="global-error-display" style="display:none;"></div>
   <div id="app" class="flex flex-col min-h-screen">
     <!-- 頂部導航列 -->
     <header class="bg-indigo-900 text-white shadow-md sticky top-0 z-50">
@@ -349,7 +366,7 @@
                   </div>
                   <div class="flex justify-between">
                     <span class="text-slate-400">附件數量：</span>
-                    <span class="font-medium text-white">{{ selectedDriveFiles.length }} 個檔案</span>
+                    <span class="font-medium text-white">{{ selectedAttachments.length }} 個檔案</span>
                   </div>
                 </div>
 
@@ -1635,6 +1652,22 @@
           tabs.value.find(t => t.id === 'cleanup').badge = cleanupCandidates.value.length;
         };
 
+        const loadCleanupList = () => {
+          if (typeof google !== 'undefined' && google.script && google.script.run) {
+            google.script.run
+              .withSuccessHandler((res) => {
+                if (res && res.success) {
+                  cleanupCandidates.value = res.candidates || [];
+                  updateCleanupBadge();
+                  triggerToast('掃描完成', `找到 ${cleanupCandidates.value.length} 筆可清理信件`);
+                }
+              })
+              .getCleanupCandidates();
+          } else {
+            triggerToast('掃描完成', `找到 ${cleanupCandidates.value.length} 筆可清理信件`);
+          }
+        };
+
         const handleTrashEmail = (item) => {
           const idx = cleanupCandidates.value.findIndex(c => c.orderId === item.orderId);
           if (idx >= 0) cleanupCandidates.value.splice(idx, 1);
@@ -1804,6 +1837,7 @@
           triggerGmailScan,
           handleMarkReceived,
           cleanupCandidates,
+          loadCleanupList,
           handleTrashEmail,
           reconcileConfig,
           reconcilePairs,

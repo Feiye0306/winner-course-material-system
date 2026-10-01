@@ -21,8 +21,7 @@ const CONFIG = {
  * Web App 入口
  */
 function doGet(e) {
-  return HtmlService.createTemplateFromFile("index")
-    .evaluate()
+  return HtmlService.createHtmlOutputFromFile("index")
     .setTitle("補習班講義印刷與發放雲端管理系統")
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
