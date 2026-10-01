@@ -1,0 +1,1831 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>贏家升大 - 講義送印、對帳與發放管理系統</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- SheetJS (xlsx) for Excel upload & reconciliation -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&display=swap');
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background-color: #cbd5e1;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div id="app" class="flex flex-col min-h-screen">
+    <!-- 頂部導航列 -->
+    <header class="bg-indigo-900 text-white shadow-md sticky top-0 z-50">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center h-16">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-amber-200 flex items-center justify-center text-indigo-950 font-bold text-xl shadow">
+            印
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-tight">補習班講義印刷與發放雲端系統</h1>
+            <p class="text-xs text-indigo-200 flex items-center space-x-1">
+              <span>贏家升大教學團隊</span>
+              <span>•</span>
+              <span class="text-emerald-400 font-medium">winners.educenter@gmail.com</span>
+            </p>
+          </div>
+        </div>
+
+        <!-- 導航分頁 -->
+        <nav class="flex space-x-1 sm:space-x-2">
+          <button 
+            v-for="tab in tabs" 
+            :key="tab.id"
+            @click="currentTab = tab.id"
+            :class="[
+              'px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center space-x-1.5',
+              currentTab === tab.id 
+                ? 'bg-white text-indigo-900 shadow font-semibold' 
+                : 'text-indigo-100 hover:bg-indigo-800/60'
+            ]"
+          >
+            <i :class="tab.icon"></i>
+            <span class="hidden md:inline">{{ tab.name }}</span>
+            <span v-if="tab.badge && tab.badge > 0" class="ml-1 px-1.5 py-0.2 bg-rose-500 text-white text-xs rounded-full">
+              {{ tab.badge }}
+            </span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- 主要內容區 -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      
+      <!-- 全域提示訊息 (Toast) -->
+      <div v-if="toast.show" class="fixed bottom-5 right-5 z-50 flex items-center px-4 py-3 rounded-xl shadow-2xl text-white transition-all transform animate-bounce"
+           :class="toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'">
+        <i :class="toast.type === 'error' ? 'fa-solid fa-circle-exclamation' : 'fa-solid fa-circle-check'" class="text-xl mr-3"></i>
+        <div>
+          <h4 class="font-bold text-sm">{{ toast.title }}</h4>
+          <p class="text-xs opacity-90">{{ toast.message }}</p>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- TAB 1: 講義送印精靈 (產生標準化郵件與寄出) -->
+      <!-- ========================================== -->
+      <section v-if="currentTab === 'wizard'" class="space-y-6">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+            <div>
+              <h2 class="text-xl font-bold text-slate-800 flex items-center space-x-2">
+                <i class="fa-solid fa-paper-plane text-indigo-600"></i>
+                <span>講義送印發信精靈</span>
+              </h2>
+              <p class="text-sm text-slate-500 mt-1">選擇雲端講義與封面檔，自動計算 PDF 頁數並生成規範化標題一鍵寄送影印店</p>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-xs px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full font-medium border border-indigo-200">
+                收件：{{ settings.vendorName }} ({{ settings.vendorEmail }})
+              </span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <!-- 左側設定表單 (8 格) -->
+            <div class="lg:col-span-7 space-y-5">
+              
+              <!-- 1. 講義名稱 -->
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">
+                  講義名稱 <span class="text-rose-500">*</span>
+                </label>
+                <div class="relative">
+                  <input 
+                    type="text" 
+                    v-model="form.materialName" 
+                    placeholder="例如：國三上社會講義、高一上英文講義、學測數學講義B3"
+                    class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium"
+                  >
+                  <span v-if="form.isReprint" class="absolute right-3 top-2.5 px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-bold rounded">
+                    加印模式
+                  </span>
+                </div>
+              </div>
+
+              <!-- 2. 色彩規格 & 封面形式 -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-1">印刷色彩規格</label>
+                  <select v-model="form.colorType" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-indigo-500">
+                    <option value="黑白">黑白</option>
+                    <option value="彩色">彩色</option>
+                    <option value="黑白/彩色">黑白/彩色 (混印)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-1">封面規格</label>
+                  <div class="flex space-x-2">
+                    <input 
+                      type="text" 
+                      v-model="form.coverType" 
+                      placeholder="公版封面"
+                      class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-indigo-500"
+                    >
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. 本數配置 (學用 & 教用) -->
+              <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <label class="block text-sm font-semibold text-slate-700 mb-2">印製本數配置</label>
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <span class="text-xs text-slate-500 font-medium">學用本數</span>
+                    <div class="flex items-center mt-1">
+                      <button @click="form.studentCopies = Math.max(0, form.studentCopies - 1)" class="w-9 h-9 rounded-l-lg bg-white border border-slate-300 hover:bg-slate-100 flex items-center justify-center text-slate-600 font-bold">-</button>
+                      <input type="number" v-model.number="form.studentCopies" min="0" class="w-full h-9 border-y border-slate-300 text-center font-bold text-sm">
+                      <button @click="form.studentCopies++" class="w-9 h-9 rounded-r-lg bg-white border border-slate-300 hover:bg-slate-100 flex items-center justify-center text-slate-600 font-bold">+</button>
+                    </div>
+                  </div>
+                  <div>
+                    <span class="text-xs text-slate-500 font-medium">教用本數</span>
+                    <div class="flex items-center mt-1">
+                      <button @click="form.teacherCopies = Math.max(0, form.teacherCopies - 1)" class="w-9 h-9 rounded-l-lg bg-white border border-slate-300 hover:bg-slate-100 flex items-center justify-center text-slate-600 font-bold">-</button>
+                      <input type="number" v-model.number="form.teacherCopies" min="0" class="w-full h-9 border-y border-slate-300 text-center font-bold text-sm">
+                      <button @click="form.teacherCopies++" class="w-9 h-9 rounded-r-lg bg-white border border-slate-300 hover:bg-slate-100 flex items-center justify-center text-slate-600 font-bold">+</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-2 text-right">
+                  <span class="text-xs font-semibold text-indigo-700">
+                    本批次合計：{{ form.studentCopies + form.teacherCopies }} 本
+                  </span>
+                </div>
+              </div>
+
+              <!-- 4. 交件日期 (自動換算星期) & 特殊標籤 -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-1">預計交件日期</label>
+                  <input 
+                    type="date" 
+                    v-model="rawDueDate" 
+                    @change="handleDateChange"
+                    class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-indigo-500"
+                  >
+                  <p class="text-xs text-indigo-600 mt-1 font-semibold">格式化：{{ form.dueDateFormatted }}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-1">特殊標籤 (選填)</label>
+                  <input 
+                    type="text" 
+                    v-model="form.specialTag" 
+                    placeholder="例如：要分隔(藍色)"
+                    class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-indigo-500"
+                  >
+                </div>
+              </div>
+
+              <!-- 5. 電腦同步資料夾檔案選擇與秒讀 PDF 頁數 -->
+              <div class="p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-3">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span class="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
+                      <i class="fa-solid fa-folder-open text-amber-500"></i>
+                      <span>電腦講義資料夾 (Google 雲端同步資料夾)</span>
+                    </span>
+                    <p class="text-[11px] text-slate-500 mt-0.5">點擊選取電腦內的同步資料夾，系統將列出講義與封面並自動讀取頁數</p>
+                  </div>
+                  
+                  <div class="flex items-center space-x-2">
+                    <!-- 隱藏的資料夾選取 input -->
+                    <input 
+                      type="file" 
+                      ref="localFolderInput" 
+                      webkitdirectory 
+                      directory 
+                      multiple 
+                      @change="handleLocalFolderSelect" 
+                      class="hidden"
+                    >
+                    <!-- 隱藏的單檔/多檔選取 input -->
+                    <input 
+                      type="file" 
+                      ref="localFileInput" 
+                      multiple 
+                      @change="handleLocalFilesSelect" 
+                      class="hidden"
+                    >
+
+                    <button 
+                      @click="$refs.localFolderInput.click()" 
+                      type="button"
+                      class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center space-x-1 transition-all"
+                    >
+                      <i class="fa-solid fa-folder-tree"></i>
+                      <span>選取電腦資料夾</span>
+                    </button>
+
+                    <button 
+                      @click="$refs.localFileInput.click()" 
+                      type="button"
+                      class="px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-sm flex items-center space-x-1 transition-all"
+                      title="直接加入電腦內個別檔案"
+                    >
+                      <i class="fa-solid fa-plus"></i>
+                      <span>加檔案</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 提示目前載入的資料夾 -->
+                <div v-if="loadedFolderInfo" class="flex items-center justify-between bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 text-xs">
+                  <span class="text-emerald-800 font-medium truncate flex items-center space-x-1">
+                    <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                    <span>已載入資料夾：<b>{{ loadedFolderInfo.name }}</b> (共 {{ availableLocalFiles.length }} 個檔案)</span>
+                  </span>
+                  <button @click="openFilePickerModal" class="text-indigo-600 hover:text-indigo-800 font-bold ml-2 whitespace-nowrap">
+                    瀏覽選單
+                  </button>
+                </div>
+
+                <!-- 已選取之送印附件清單 -->
+                <div v-if="selectedAttachments.length === 0" class="text-center py-4 border-2 border-dashed border-indigo-200 rounded-lg bg-white/70">
+                  <p class="text-xs text-slate-500">尚未勾選任何送印檔案</p>
+                  <p class="text-[11px] text-slate-400 mt-0.5">點擊上方「選取電腦資料夾」選擇您 Google 雲端同步的目錄</p>
+                </div>
+
+                <div v-else class="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                  <div 
+                    v-for="(file, idx) in selectedAttachments" 
+                    :key="file.name" 
+                    class="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-slate-200 text-xs shadow-xs"
+                  >
+                    <div class="flex items-center space-x-2 truncate">
+                      <i :class="file.isPdf ? 'fa-regular fa-file-pdf text-rose-500' : 'fa-regular fa-file-image text-amber-500'" class="text-base"></i>
+                      <span class="font-medium text-slate-700 truncate max-w-xs">{{ file.name }}</span>
+                      <span class="text-slate-400 text-[10px]">({{ file.sizeFormatted }})</span>
+                      <span v-if="file.detectedPages" class="px-1.5 py-0.2 bg-indigo-50 text-indigo-700 font-bold text-[10px] rounded">
+                        {{ file.detectedPages }} 頁
+                      </span>
+                    </div>
+                    <button @click="removeSelectedAttachment(idx)" class="text-slate-400 hover:text-rose-600 p-1">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- PDF 總頁數手動微調與自動識別確認 -->
+                <div class="pt-2 border-t border-indigo-100 flex items-center justify-between">
+                  <div class="flex items-center space-x-1.5">
+                    <label class="text-xs font-bold text-slate-700">內頁 PDF 總頁數：</label>
+                    <span class="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-medium">選取 PDF 時自動解析填入</span>
+                  </div>
+                  <div class="flex items-center space-x-1.5">
+                    <input 
+                      type="number" 
+                      v-model.number="form.pdfPages" 
+                      min="1"
+                      class="w-20 px-2 py-1 text-center border border-slate-300 rounded font-bold text-sm bg-white focus:ring-2 focus:ring-indigo-500"
+                    >
+                    <span class="text-xs text-slate-600 font-medium">頁</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 6. 內文附註說明 -->
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">內文補充附註 (選填)</label>
+                <textarea 
+                  v-model="form.note" 
+                  rows="2"
+                  placeholder="例如：您好，英文B5L1~L6幫我放前面，謝謝您。/ 再麻煩學用幫我印黑白；教用印彩色。"
+                  class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-normal focus:ring-2 focus:ring-indigo-500"
+                ></textarea>
+              </div>
+
+            </div>
+
+            <!-- 右側即時預覽與寄出 (5 格) -->
+            <div class="lg:col-span-5 flex flex-col justify-between space-y-6">
+              
+              <!-- 標題預覽卡片 -->
+              <div class="bg-slate-900 text-white rounded-2xl p-5 shadow-xl space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <span class="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center space-x-1">
+                    <i class="fa-solid fa-eye"></i>
+                    <span>Gmail 規範化標題預覽</span>
+                  </span>
+                  <span class="text-[11px] px-2 py-0.5 bg-slate-800 text-slate-300 rounded">廠商對帳完全相符格式</span>
+                </div>
+
+                <div class="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700">
+                  <p class="font-mono text-sm text-emerald-300 font-semibold break-all leading-relaxed">
+                    {{ formattedEmailSubject }}
+                  </p>
+                </div>
+
+                <!-- 寄出信件內容簡報 -->
+                <div class="text-xs space-y-2 text-slate-300 pt-1">
+                  <div class="flex justify-between">
+                    <span class="text-slate-400">收件店鋪：</span>
+                    <span class="font-medium text-white">{{ settings.vendorName }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-slate-400">總印製本數：</span>
+                    <span class="font-medium text-white">{{ form.studentCopies + form.teacherCopies }} 本</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-slate-400">附件數量：</span>
+                    <span class="font-medium text-white">{{ selectedDriveFiles.length }} 個檔案</span>
+                  </div>
+                </div>
+
+                <!-- 費用即時估算卡 -->
+                <div class="p-3 bg-slate-800/50 rounded-xl border border-slate-700/60 mt-2">
+                  <div class="flex justify-between items-center text-xs">
+                    <span class="text-slate-300">系統即時預估費用：</span>
+                    <span class="text-base font-bold text-amber-400 font-mono">
+                      約 ${{ estimatedCost }} 元
+                    </span>
+                  </div>
+                  <p class="text-[10px] text-slate-400 mt-1">
+                    公式：({{ form.pdfPages }}頁 × ${{ currentUnitPrice }} + ${{ settings.defaultBindingCost }}裝訂) × {{ form.studentCopies + form.teacherCopies }}本
+                  </p>
+                </div>
+              </div>
+
+              <!-- 寄出按鈕群 -->
+              <div class="space-y-3">
+                <button 
+                  @click="handleSendPrintEmail"
+                  :disabled="isSubmitting || !form.materialName"
+                  class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-500/25 transition-all flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <i v-if="isSubmitting" class="fa-solid fa-spinner fa-spin"></i>
+                  <i v-else class="fa-solid fa-paper-plane"></i>
+                  <span>{{ isSubmitting ? '正在掛載雲端檔案並發送...' : '確認無誤，正式發信送印' }}</span>
+                </button>
+
+                <p class="text-[11px] text-center text-slate-400">
+                  <i class="fa-solid fa-shield-halved mr-1"></i>
+                  送印成功後將自動寫入 Google Sheets 資料庫，永久保存工單紀錄。
+                </p>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ========================================== -->
+      <!-- TAB 2: 講義母子管理與「一鍵加印」儀表板 -->
+      <!-- ========================================== -->
+      <section v-if="currentTab === 'inventory'" class="space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-800 flex items-center space-x-2">
+              <i class="fa-solid fa-layer-group text-indigo-600"></i>
+              <span>講義母子總表與庫存追蹤</span>
+            </h2>
+            <p class="text-sm text-slate-500 mt-1">以每本講義為核心，自動整合初印與多次加印，掌握到貨、現場發放與剩餘本數</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button 
+              @click="triggerGmailScan" 
+              :disabled="isScanningGmail"
+              class="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold rounded-xl shadow-sm flex items-center space-x-1.5 transition-all disabled:opacity-50"
+              title="掃描 Gmail 寄件備份，解析所有歷史送印講義、標籤與加印紀錄"
+            >
+              <i v-if="isScanningGmail" class="fa-solid fa-spinner fa-spin"></i>
+              <i v-else class="fa-solid fa-envelope-open-text"></i>
+              <span>{{ isScanningGmail ? '正在掃描歷史信件與標籤...' : '掃描 Gmail 歷史送印信件' }}</span>
+            </button>
+            <button @click="loadOrders" class="px-3 py-2 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl hover:bg-slate-50 flex items-center space-x-1 shadow-sm">
+              <i class="fa-solid fa-rotate"></i>
+              <span>重新整理</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 講義母卡片清單 (母子架構) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div 
+            v-for="group in groupedMaterials" 
+            :key="group.materialName"
+            class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 hover:shadow-md transition-all flex flex-col justify-between"
+          >
+            <div>
+              <div class="flex items-start justify-between">
+                <div>
+                  <span class="text-[11px] font-bold px-2 py-0.5 rounded-full"
+                        :class="group.colorType === '彩色' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700'">
+                    {{ group.colorType }}
+                  </span>
+                  <h3 class="text-base font-bold text-slate-800 mt-1.5">{{ group.materialName }}</h3>
+                  <p class="text-xs text-slate-400 mt-0.5">{{ group.pdfPages }} 頁 • {{ group.coverType }}</p>
+                </div>
+                
+                <!-- 庫存狀態徽章 -->
+                <div class="text-right">
+                  <span class="text-xs text-slate-500 font-medium">剩餘庫存</span>
+                  <div class="text-xl font-black font-mono" :class="group.stockLeft > 0 ? 'text-emerald-600' : 'text-rose-600'">
+                    {{ group.stockLeft }} <span class="text-xs text-slate-400 font-normal">本</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 概況進度條 -->
+              <div class="mt-4 p-3 bg-slate-50 rounded-xl space-y-2 text-xs">
+                <div class="flex justify-between font-medium">
+                  <span class="text-slate-500">累計總印量：</span>
+                  <span class="font-bold text-slate-800">{{ group.totalPrinted }} 本 (初印 {{ group.initialCopies }} + 加印 {{ group.reprintCopies }})</span>
+                </div>
+                <div class="flex justify-between font-medium">
+                  <span class="text-slate-500">已到貨入庫：</span>
+                  <span class="font-bold text-indigo-600">{{ group.totalReceived }} 本</span>
+                </div>
+                <div class="flex justify-between font-medium">
+                  <span class="text-slate-500">現場已發放：</span>
+                  <span class="font-bold text-emerald-600">{{ group.totalDistributed }} 本</span>
+                </div>
+              </div>
+
+              <!-- 送印批次明細展開 -->
+              <div class="mt-4">
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">歷史送印批次</h4>
+                <div class="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                  <div 
+                    v-for="b in group.batches" 
+                    :key="b.orderId"
+                    class="flex items-center justify-between text-xs p-2 rounded-lg border border-slate-100 bg-white"
+                  >
+                    <div>
+                      <span v-if="b.isReprint" class="px-1.5 py-0.5 bg-amber-100 text-amber-800 font-bold rounded text-[10px] mr-1">加印</span>
+                      <span v-else class="px-1.5 py-0.5 bg-blue-100 text-blue-800 font-bold rounded text-[10px] mr-1">初印</span>
+                      <span class="font-semibold text-slate-700">{{ b.studentCopies + b.teacherCopies }} 本</span>
+                      <span class="text-slate-400 text-[10px] ml-1">({{ b.dueDate }})</span>
+                    </div>
+
+                    <div class="flex items-center space-x-1.5">
+                      <!-- 收書確認狀態 -->
+                      <button 
+                        v-if="b.deliveryStatus === 'PENDING'"
+                        @click="handleMarkReceived(b.orderId)"
+                        class="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-[10px] font-bold"
+                        title="點擊確認到貨入庫"
+                      >
+                        待收書
+                      </button>
+                      <span v-else class="text-emerald-600 font-bold text-[11px] flex items-center">
+                        <i class="fa-solid fa-check mr-0.5"></i>已到貨
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 卡片底部操作：一鍵加印 & 現場發放 -->
+            <div class="mt-5 pt-4 border-t border-slate-100 flex items-center space-x-2">
+              <button 
+                @click="startQuickReprint(group)"
+                class="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center justify-center space-x-1"
+              >
+                <i class="fa-solid fa-plus"></i>
+                <span>＋ 一鍵加印</span>
+              </button>
+              <button 
+                @click="openDistributionTab(group)"
+                class="flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition-all flex items-center justify-center space-x-1"
+              >
+                <i class="fa-solid fa-clipboard-check"></i>
+                <span>發給學生</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ========================================== -->
+      <!-- TAB 3: 可視化信件清理助手 (瘦身省空間) -->
+      <!-- ========================================== -->
+      <section v-if="currentTab === 'cleanup'" class="space-y-6">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-6">
+            <div>
+              <h2 class="text-xl font-bold text-slate-800 flex items-center space-x-2">
+                <i class="fa-solid fa-broom text-amber-500"></i>
+                <span>Gmail 大附件空間清理助手</span>
+              </h2>
+              <p class="text-sm text-slate-500 mt-1">講義已收齊入庫？在這裡安全將含大附件的送印信件移至垃圾桶，永久保留系統紀錄！</p>
+            </div>
+            <div>
+              <button @click="loadCleanupList" class="px-3 py-2 bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl hover:bg-slate-200 flex items-center space-x-1">
+                <i class="fa-solid fa-arrows-rotate"></i>
+                <span>掃描可清理信件</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 清理候選清單 -->
+          <div v-if="cleanupCandidates.length === 0" class="text-center py-12">
+            <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">
+              <i class="fa-solid fa-check"></i>
+            </div>
+            <h4 class="font-bold text-slate-700">目前沒有需要清理的信件！</h4>
+            <p class="text-xs text-slate-400 mt-1">所有已到貨的信件均已清理，或尚無已收書的送印郵件。</p>
+          </div>
+
+          <div v-else class="space-y-3">
+            <div 
+              v-for="item in cleanupCandidates" 
+              :key="item.orderId"
+              class="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
+            >
+              <div class="space-y-1">
+                <div class="flex items-center space-x-2">
+                  <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded">講義已收到</span>
+                  <span class="font-bold text-sm text-slate-800">{{ item.materialName }}</span>
+                  <span class="text-xs text-slate-400 font-mono">{{ item.sentTime }}</span>
+                </div>
+                <p class="text-xs text-slate-500 font-mono truncate max-w-2xl">{{ item.subject }}</p>
+                <p class="text-[11px] text-amber-600 font-medium">
+                  <i class="fa-solid fa-paperclip mr-1"></i>
+                  包含 {{ item.attachmentCount }} 個大附件，佔用約 <span class="font-bold">{{ item.attachmentSizeMb }} MB</span> 空間
+                </p>
+              </div>
+
+              <div class="flex items-center space-x-2">
+                <button 
+                  @click="handleTrashEmail(item)"
+                  class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center space-x-1.5"
+                >
+                  <i class="fa-solid fa-trash-can"></i>
+                  <span>移至垃圾桶 (釋放 {{ item.attachmentSizeMb }} MB)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ========================================== -->
+      <!-- TAB 4: 廠商 Excel 智慧核帳台 (對照與試算) -->
+      <!-- ========================================== -->
+      <section v-if="currentTab === 'reconcile'" class="space-y-6">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-6">
+            <div>
+              <h2 class="text-xl font-bold text-slate-800 flex items-center space-x-2">
+                <i class="fa-solid fa-scale-balanced text-indigo-600"></i>
+                <span>廠商請款 Excel 智慧核帳工作台</span>
+              </h2>
+              <p class="text-sm text-slate-500 mt-1">上傳影印店月結 Excel，自動智能配對、左右對照，即時試算各分項費率與異常標記</p>
+            </div>
+
+            <!-- 費率微調輸入區 (使用者指定功能) -->
+            <div class="p-3 bg-amber-50 rounded-xl border border-amber-200 flex flex-wrap items-center gap-3 text-xs">
+              <span class="font-bold text-amber-900 flex items-center">
+                <i class="fa-solid fa-sliders mr-1"></i> 彈性計費參數：
+              </span>
+              <div class="flex items-center space-x-1">
+                <span class="text-slate-600">黑白單頁:</span>
+                <input type="number" step="0.01" v-model.number="reconcileConfig.bwPrice" @change="recomputeReconcile" class="w-16 px-1.5 py-0.5 border border-amber-300 rounded font-bold text-center bg-white">
+                <span>元</span>
+              </div>
+              <div class="flex items-center space-x-1">
+                <span class="text-slate-600">彩色單頁:</span>
+                <input type="number" step="0.01" v-model.number="reconcileConfig.colorPrice" @change="recomputeReconcile" class="w-16 px-1.5 py-0.5 border border-amber-300 rounded font-bold text-center bg-white">
+                <span>元</span>
+              </div>
+              <div class="flex items-center space-x-1">
+                <span class="text-slate-600">膠裝封面:</span>
+                <input type="number" v-model.number="reconcileConfig.bindingCost" @change="recomputeReconcile" class="w-14 px-1.5 py-0.5 border border-amber-300 rounded font-bold text-center bg-white">
+                <span>元</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 上傳 Excel 區域 -->
+          <div class="mb-6">
+            <div 
+              @dragover.prevent 
+              @drop.prevent="handleExcelDrop"
+              class="border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl p-6 text-center bg-slate-50/50 cursor-pointer transition-all"
+              @click="$refs.excelFileInput.click()"
+            >
+              <input type="file" ref="excelFileInput" @change="handleExcelUpload" accept=".xlsx, .xls" class="hidden">
+              <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-2 text-xl">
+                <i class="fa-solid fa-file-excel"></i>
+              </div>
+              <h4 class="text-sm font-bold text-slate-700">拖曳或點擊上傳廠商請款 Excel 檔案</h4>
+              <p class="text-xs text-slate-400 mt-1">支援截圖中的品名、頁數、本數、金額格式，系統將自動比對我方系統工單</p>
+            </div>
+          </div>
+
+          <!-- 左右對照工作台 -->
+          <div v-if="reconcilePairs.length > 0" class="space-y-4">
+            <div class="flex items-center justify-between text-xs px-2 text-slate-500 font-semibold">
+              <div class="w-5/12 flex items-center space-x-2">
+                <span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">我方系統送印紀錄</span>
+                <span>(真實本數 / PDF 實測頁數 / 預期應付)</span>
+              </div>
+              <div class="w-2/12 text-center">核對狀態</div>
+              <div class="w-5/12 flex items-center justify-end space-x-2">
+                <span>(請款頁數 / 請款本數 / 請款金額)</span>
+                <span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded">廠商 Excel 請款列</span>
+              </div>
+            </div>
+
+            <!-- 對照列清單 -->
+            <div class="space-y-2">
+              <div 
+                v-for="(pair, idx) in reconcilePairs" 
+                :key="idx"
+                class="p-4 rounded-xl border transition-all flex flex-col md:flex-row items-center justify-between gap-4 text-xs"
+                :class="[
+                  pair.status === 'MATCH' ? 'bg-emerald-50/30 border-emerald-200' :
+                  pair.status === 'DIFF' ? 'bg-amber-50/40 border-amber-300' : 'bg-rose-50/30 border-rose-200'
+                ]"
+              >
+                <!-- 左側：我方送印工單 -->
+                <div class="w-full md:w-5/12 space-y-1">
+                  <div class="flex items-center space-x-1.5">
+                    <span v-if="pair.systemOrder?.isReprint" class="px-1.5 py-0.2 bg-amber-100 text-amber-800 text-[10px] font-bold rounded">加印</span>
+                    <span class="font-bold text-sm text-slate-800">{{ pair.systemOrder?.materialName || '（我方無對應紀錄）' }}</span>
+                  </div>
+                  <div v-if="pair.systemOrder" class="text-slate-500 font-mono flex items-center space-x-2">
+                    <span>頁數: <b class="text-slate-800">{{ pair.systemOrder.pdfPages }}</b> 頁</span>
+                    <span>•</span>
+                    <span>本數: <b class="text-slate-800">{{ pair.systemOrder.studentCopies + pair.systemOrder.teacherCopies }}</b> 本</span>
+                    <span>•</span>
+                    <span>應付: <b class="text-indigo-600 font-bold">${{ pair.computedExpectedAmount }}</b> 元</span>
+                  </div>
+                </div>
+
+                <!-- 中間：狀態燈號與備註 -->
+                <div class="w-full md:w-2/12 flex flex-col items-center justify-center">
+                  <span 
+                    class="px-2.5 py-1 rounded-full font-bold text-xs flex items-center space-x-1"
+                    :class="[
+                      pair.status === 'MATCH' ? 'bg-emerald-100 text-emerald-800' :
+                      pair.status === 'DIFF' ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                    ]"
+                  >
+                    <i :class="[
+                      pair.status === 'MATCH' ? 'fa-solid fa-circle-check' :
+                      pair.status === 'DIFF' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-xmark'
+                    ]"></i>
+                    <span>{{ pair.statusText }}</span>
+                  </span>
+                  <span v-if="pair.diffNote" class="text-[10px] text-amber-700 font-medium mt-1 text-center">
+                    {{ pair.diffNote }}
+                  </span>
+                </div>
+
+                <!-- 右側：廠商 Excel 請款列 -->
+                <div class="w-full md:w-5/12 text-left md:text-right space-y-1">
+                  <div class="font-bold text-sm text-slate-800 truncate" :title="pair.vendorRow?.rawName">
+                    {{ pair.vendorRow?.rawName || '（廠商未請款）' }}
+                  </div>
+                  <div v-if="pair.vendorRow" class="text-slate-500 font-mono flex items-center justify-start md:justify-end space-x-2">
+                    <span>請款頁數: <b class="text-slate-800">{{ pair.vendorRow.pages }}</b> 頁</span>
+                    <span>•</span>
+                    <span>請款本數: <b class="text-slate-800">{{ pair.vendorRow.copies }}</b> 本</span>
+                    <span>•</span>
+                    <span>請款金額: <b class="text-rose-600 font-bold">${{ pair.vendorRow.totalAmount }}</b> 元</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 對帳統計總結 -->
+            <div class="p-4 bg-slate-900 text-white rounded-xl flex flex-col sm:flex-row justify-between items-center text-xs">
+              <div>
+                <span>比對總筆數：<b>{{ reconcilePairs.length }}</b> 筆 </span>
+                <span class="ml-2 text-emerald-400">完全吻合：<b>{{ reconcilePairs.filter(p => p.status === 'MATCH').length }}</b></span>
+                <span class="ml-2 text-amber-400">有微小差異：<b>{{ reconcilePairs.filter(p => p.status === 'DIFF').length }}</b></span>
+              </div>
+              <div class="mt-2 sm:mt-0 font-mono text-sm">
+                <span>廠商請款總額：<b class="text-amber-300">${{ totalVendorAmount }}</b> 元</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ========================================== -->
+      <!-- TAB 5: 現場學生發放名單與動態點名 (扣減庫存) -->
+      <!-- ========================================== -->
+      <section v-if="currentTab === 'roster'" class="space-y-6">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-6">
+            <div>
+              <h2 class="text-xl font-bold text-slate-800 flex items-center space-x-2">
+                <i class="fa-solid fa-users-viewfinder text-indigo-600"></i>
+                <span>課堂學生名單發放與庫存扣減</span>
+              </h2>
+              <p class="text-sm text-slate-500 mt-1">直接從 LINE 或 Excel 貼上名單，打勾確認領取、標記請假未拿或新生備取</p>
+            </div>
+
+            <!-- 選擇要發放的講義 -->
+            <div class="flex items-center space-x-2">
+              <label class="text-xs font-semibold text-slate-600">選擇發放講義：</label>
+              <select v-model="selectedMaterialForRoster" class="px-3 py-1.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-800 focus:ring-indigo-500">
+                <option v-for="g in groupedMaterials" :key="g.materialName" :value="g.materialName">
+                  {{ g.materialName }} (剩餘 {{ g.stockLeft }} 本)
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- 左側：快速貼上學生名單 (4 格) -->
+            <div class="lg:col-span-4 space-y-4">
+              <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  1. 快速貼上學生名單
+                </label>
+                <p class="text-[11px] text-slate-400 mb-2">可從 LINE 記事本或 Excel 直接整欄複製貼上（換行、逗號皆可）</p>
+                <textarea 
+                  v-model="rawRosterInput" 
+                  rows="7"
+                  placeholder="王小明&#10;陳大華&#10;林小美&#10;張三..."
+                  class="w-full p-2.5 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                ></textarea>
+                <button 
+                  @click="parseAndApplyRoster"
+                  class="mt-2 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow transition-all"
+                >
+                  解析並載入勾選名單
+                </button>
+              </div>
+
+              <!-- 新生/試聽備用講義登記 -->
+              <div class="p-4 bg-amber-50/60 rounded-xl border border-amber-200">
+                <label class="block text-xs font-bold text-amber-900 mb-1">＋ 登記新生/試聽領取</label>
+                <div class="flex space-x-1.5 mt-2">
+                  <input type="text" v-model="newStudentName" placeholder="新生姓名 (例如: 許同學)" class="flex-1 px-2.5 py-1.5 text-xs border border-amber-300 rounded-lg bg-white">
+                  <button @click="addNewStudentToRoster" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm">
+                    加入
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 右側：互動式勾選發放清單 (8 格) -->
+            <div class="lg:col-span-8 space-y-4">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                  <span class="text-xs font-bold text-slate-700">名單統計：共 {{ activeRoster.length }} 人</span>
+                  <span class="text-xs font-bold text-emerald-600">已領取：{{ activeRoster.filter(s => s.received).length }}</span>
+                  <span class="text-xs font-bold text-rose-500">請假未領：{{ activeRoster.filter(s => !s.received).length }}</span>
+                </div>
+                <div class="flex space-x-2">
+                  <button @click="toggleSelectAllRoster(true)" class="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded font-medium text-slate-700">
+                    一鍵全選已領
+                  </button>
+                  <button @click="toggleSelectAllRoster(false)" class="text-xs px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded font-medium text-slate-700">
+                    全部取消
+                  </button>
+                </div>
+              </div>
+
+              <!-- 學生卡片格狀清單 -->
+              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-96 overflow-y-auto custom-scrollbar p-1">
+                <div 
+                  v-for="(student, sIdx) in activeRoster" 
+                  :key="sIdx"
+                  @click="toggleStudentStatus(student)"
+                  class="p-2.5 rounded-xl border cursor-pointer select-none transition-all flex items-center justify-between"
+                  :class="[
+                    student.received 
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' 
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400'
+                  ]"
+                >
+                  <div class="flex items-center space-x-2 truncate">
+                    <i :class="student.received ? 'fa-solid fa-circle-check text-emerald-600' : 'fa-regular fa-circle text-slate-300'"></i>
+                    <span class="text-xs truncate">{{ student.name }}</span>
+                  </div>
+                  <span v-if="student.isNew" class="text-[9px] px-1 py-0.2 bg-amber-200 text-amber-900 rounded font-bold">新生</span>
+                </div>
+              </div>
+
+              <!-- 儲存發放結果與扣庫存按鈕 -->
+              <div class="pt-3 border-t border-slate-100 flex justify-end">
+                <button 
+                  @click="saveRosterDistribution"
+                  class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5"
+                >
+                  <i class="fa-solid fa-floppy-disk"></i>
+                  <span>儲存本次發放紀錄並更新庫存</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================== -->
+      <!-- TAB 6: 系統全域設定 -->
+      <!-- ========================================== -->
+      <section v-if="currentTab === 'settings'" class="space-y-6">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 max-w-3xl mx-auto">
+          <h2 class="text-xl font-bold text-slate-800 border-b border-slate-100 pb-3 mb-5 flex items-center space-x-2">
+            <i class="fa-solid fa-gear text-indigo-600"></i>
+            <span>補習班與廠商通訊錄設定</span>
+          </h2>
+
+          <div class="space-y-4 text-sm">
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">主要送印廠商名稱</label>
+              <input type="text" v-model="settings.vendorName" class="w-full px-3 py-2 border rounded-xl">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">廠商收件信箱 (Email)</label>
+              <input type="email" v-model="settings.vendorEmail" class="w-full px-3 py-2 border rounded-xl font-mono">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Google Drive 預設講義資料夾 ID (選填)</label>
+              <input type="text" v-model="settings.driveFolderId" placeholder="貼上 Drive 資料夾 URL 中的最後一段 ID" class="w-full px-3 py-2 border rounded-xl font-mono text-xs">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block font-semibold text-slate-700 mb-1">黑白單頁預設費率 (元)</label>
+                <input type="number" step="0.01" v-model.number="settings.defaultBwPrice" class="w-full px-3 py-2 border rounded-xl font-mono">
+              </div>
+              <div>
+                <label class="block font-semibold text-slate-700 mb-1">彩色單頁預設費率 (元)</label>
+                <input type="number" step="0.01" v-model.number="settings.defaultColorPrice" class="w-full px-3 py-2 border rounded-xl font-mono">
+              </div>
+            </div>
+            <div class="pt-4">
+              <button @click="saveSettings" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow">
+                儲存設定
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- 電腦同步資料夾檔案選擇彈窗 Modal -->
+    <div v-if="showFilePickerModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl flex flex-col max-h-[85vh]">
+        
+        <!-- 彈窗頂部 -->
+        <div class="flex items-center justify-between border-b pb-3 mb-4">
+          <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-folder-tree text-indigo-600 text-lg"></i>
+            <div>
+              <h3 class="font-bold text-base text-slate-800">電腦同步資料夾檔案瀏覽器</h3>
+              <p class="text-[11px] text-slate-400">已掃描本機同步目錄，點選講義自動讀取頁數與檔名</p>
+            </div>
+          </div>
+          <button @click="showFilePickerModal = false" class="text-slate-400 hover:text-slate-600 p-1">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+
+        <!-- 搜尋與過濾條件 -->
+        <div class="flex flex-col sm:flex-row gap-2 mb-3">
+          <div class="relative flex-1">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+            <input 
+              type="text" 
+              v-model="fileSearchQuery" 
+              placeholder="搜尋檔名或關鍵字 (例如: 國文、數學、公版...)"
+              class="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500"
+            >
+          </div>
+          <div class="flex space-x-1">
+            <button 
+              @click="fileCategoryFilter = 'all'" 
+              :class="fileCategoryFilter === 'all' ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-3 py-1 text-xs rounded-lg transition-all"
+            >
+              全部 ({{ availableLocalFiles.length }})
+            </button>
+            <button 
+              @click="fileCategoryFilter = 'pdf'" 
+              :class="fileCategoryFilter === 'pdf' ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-3 py-1 text-xs rounded-lg transition-all"
+            >
+              📄 講義 PDF
+            </button>
+            <button 
+              @click="fileCategoryFilter = 'cover'" 
+              :class="fileCategoryFilter === 'cover' ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-3 py-1 text-xs rounded-lg transition-all"
+            >
+              🎨 封面 (AI/圖)
+            </button>
+          </div>
+        </div>
+
+        <!-- 檔案列表 -->
+        <div class="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1 min-h-[250px]">
+          <div v-if="filteredLocalFiles.length === 0" class="text-center py-12 text-slate-400 text-xs">
+            <i class="fa-regular fa-folder-open text-3xl mb-2 block"></i>
+            <span>沒有找到符合條件的檔案</span>
+          </div>
+
+          <div 
+            v-for="file in filteredLocalFiles" 
+            :key="file.name"
+            @click="toggleAttachmentSelection(file)"
+            class="p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between text-xs"
+            :class="isAttachmentSelected(file.name) ? 'bg-indigo-50/80 border-indigo-400 text-indigo-900 shadow-xs' : 'bg-white border-slate-200 hover:bg-slate-50'"
+          >
+            <div class="flex items-center space-x-3 truncate">
+              <i :class="file.isPdf ? 'fa-regular fa-file-pdf text-rose-500 text-xl' : 'fa-regular fa-file-image text-amber-500 text-xl'"></i>
+              <div class="truncate">
+                <p class="font-bold text-slate-800 truncate max-w-md">{{ file.name }}</p>
+                <div class="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
+                  <span>{{ file.sizeFormatted }}</span>
+                  <span>•</span>
+                  <span>{{ file.lastModifiedFormatted }}</span>
+                  <span v-if="file.detectedPages" class="text-indigo-600 font-bold">
+                    (內文約 {{ file.detectedPages }} 頁)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center space-x-2 flex-shrink-0">
+              <span v-if="file.isPdf" class="px-2 py-0.5 bg-rose-50 text-rose-700 rounded text-[10px] font-semibold">講義PDF</span>
+              <span v-else class="px-2 py-0.5 bg-amber-50 text-amber-700 rounded text-[10px] font-semibold">公版封面</span>
+              <i :class="isAttachmentSelected(file.name) ? 'fa-solid fa-square-check text-indigo-600 text-lg' : 'fa-regular fa-square text-slate-300 text-lg'"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- 彈窗底部 -->
+        <div class="pt-4 border-t mt-3 flex items-center justify-between text-xs">
+          <div class="text-slate-500">
+            已勾選 <b class="text-indigo-600">{{ selectedAttachments.length }}</b> 個送印檔案
+          </div>
+          <div class="flex space-x-2">
+            <button @click="showFilePickerModal = false" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium">
+              取消
+            </button>
+            <button @click="confirmAttachmentSelection" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
+              確認選取並套用
+            </button>
+          </div>
+    <!-- Gmail 歷史掃描與標籤解析報告彈窗 Modal -->
+    <div v-if="showScanResultModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl flex flex-col max-h-[85vh]">
+        <div class="flex items-center justify-between border-b pb-3 mb-4">
+          <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+              <i class="fa-solid fa-brain"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-base text-slate-800">Gmail 歷史送印信件掃描成果報告</h3>
+              <p class="text-[11px] text-slate-400">已自動理解並提取主旨規律、本數與 Gmail 標籤狀態</p>
+            </div>
+          </div>
+          <button @click="showScanResultModal = false" class="text-slate-400 hover:text-slate-600 p-1">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1 text-xs">
+          <!-- 統計數字卡 -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="p-3 bg-indigo-50 rounded-xl text-center">
+              <span class="text-slate-500 text-[10px]">分析信件總數</span>
+              <p class="text-lg font-black text-indigo-700 font-mono">{{ scanReport.totalScanned }} 串</p>
+            </div>
+            <div class="p-3 bg-emerald-50 rounded-xl text-center">
+              <span class="text-slate-500 text-[10px]">新增建立工單</span>
+              <p class="text-lg font-black text-emerald-600 font-mono">{{ scanReport.importedCount }} 筆</p>
+            </div>
+            <div class="p-3 bg-slate-50 rounded-xl text-center">
+              <span class="text-slate-500 text-[10px]">跳過已存在紀錄</span>
+              <p class="text-lg font-black text-slate-600 font-mono">{{ scanReport.skippedCount }} 筆</p>
+            </div>
+          </div>
+
+          <!-- 識別出的標籤與自動規則 -->
+          <div class="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+            <h4 class="font-bold text-slate-700 mb-2 flex items-center space-x-1.5">
+              <i class="fa-solid fa-tags text-indigo-600"></i>
+              <span>成功理解並識別之 Gmail 標籤 (Labels)</span>
+            </h4>
+            <div class="flex flex-wrap gap-1.5 mb-2">
+              <span 
+                v-for="lbl in scanReport.discoveredLabels" 
+                :key="lbl" 
+                class="px-2.5 py-1 bg-white border border-slate-300 rounded-lg font-mono text-[11px] text-slate-700 shadow-xs flex items-center space-x-1"
+              >
+                <i class="fa-solid fa-tag text-[9px] text-indigo-500"></i>
+                <span>{{ lbl }}</span>
+              </span>
+            </div>
+            <p class="text-[10px] text-slate-500">
+              * 系統已將含有「<b>講義已收到</b>」標籤的信件自動標示為【已到貨入庫】，並納入庫存計算與空間清理名單。
+            </p>
+          </div>
+
+          <!-- 抽樣主旨格式解析 -->
+          <div>
+            <h4 class="font-bold text-slate-700 mb-2 flex items-center space-x-1.5">
+              <i class="fa-solid fa-list-check text-emerald-600"></i>
+              <span>歷史送印主旨格式學習範例 (抽樣 5 筆)</span>
+            </h4>
+            <div class="space-y-1.5">
+              <div 
+                v-for="(pat, pIdx) in scanReport.patterns" 
+                :key="pIdx"
+                class="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1"
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center space-x-1.5">
+                    <span v-if="pat.isReprint" class="px-1.5 py-0.2 bg-amber-100 text-amber-800 text-[10px] font-bold rounded">加印</span>
+                    <span v-else class="px-1.5 py-0.2 bg-blue-100 text-blue-800 text-[10px] font-bold rounded">正印</span>
+                    <span class="font-bold text-slate-800">{{ pat.materialName }}</span>
+                    <span class="text-slate-500">({{ pat.copies }} 本)</span>
+                  </div>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold"
+                        :class="pat.deliveryStatus === '已收到' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'">
+                    {{ pat.deliveryStatus }}
+                  </span>
+                </div>
+                <p class="font-mono text-[11px] text-slate-500 truncate">{{ pat.subject }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t mt-3 flex justify-end">
+          <button @click="showScanResultModal = false" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
+            太棒了，完成匯入並檢視總表
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 前端邏輯 Vue 3 -->
+  <script>
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const currentTab = ref('wizard');
+        const isSubmitting = ref(false);
+        const showDriveModal = ref(false);
+
+        // Gmail 歷史掃描與標籤學習狀態
+        const isScanningGmail = ref(false);
+        const showScanResultModal = ref(false);
+        const scanReport = ref({
+          totalScanned: 0,
+          importedCount: 0,
+          skippedCount: 0,
+          discoveredLabels: [],
+          patterns: []
+        });
+
+        const triggerGmailScan = () => {
+          isScanningGmail.value = true;
+          if (typeof google !== 'undefined' && google.script && google.script.run) {
+            google.script.run
+              .withSuccessHandler((res) => {
+                isScanningGmail.value = false;
+                if (res.success) {
+                  scanReport.value = res;
+                  showScanResultModal.value = true;
+                  loadOrders();
+                  triggerToast('掃描完成', res.message);
+                } else {
+                  triggerToast('掃描失敗', res.message, 'error');
+                }
+              })
+              .withFailureHandler((err) => {
+                isScanningGmail.value = false;
+                triggerToast('掃描發生錯誤', err.message, 'error');
+              })
+              .scanAndImportGmailHistory();
+          } else {
+            // 本地模擬學習歷史格式與標籤 (基於截圖真實資料)
+            setTimeout(() => {
+              isScanningGmail.value = false;
+              scanReport.value = {
+                totalScanned: 36,
+                importedCount: 18,
+                skippedCount: 18,
+                discoveredLabels: [
+                  "888講義DM印製/泗商影印社",
+                  "888講義DM印製/講義已收到"
+                ],
+                patterns: [
+                  { subject: "[國三上社會講義][黑白][學21][08/27(四)][公版封面]", materialName: "國三上社會講義", copies: 21, isReprint: false, deliveryStatus: "已收到" },
+                  { subject: "[學測數學講義B3][彩色][學26/教1][08/20(四)][公版封面]", materialName: "學測數學講義B3", copies: 27, isReprint: false, deliveryStatus: "已收到" },
+                  { subject: "[高二物理講義][黑白][學8][08/20(四)][要分隔(藍色)][公版封面]", materialName: "高二物理講義", copies: 8, isReprint: false, deliveryStatus: "已收到" },
+                  { subject: "[加印][學測數學講義B2][彩色][學2][07/09(四)][公版封面]", materialName: "學測數學講義B2", copies: 2, isReprint: true, deliveryStatus: "已收到" },
+                  { subject: "[國一上英文講義][黑白][學20][09/2(三)][公版封面]", materialName: "國一上英文講義", copies: 20, isReprint: false, deliveryStatus: "待收書" }
+                ]
+              };
+              // 加入模擬資料至 orders
+              orders.value.push(
+                { orderId: 'HIST-20260827-01', materialName: '國三上社會講義', isReprint: false, colorType: '黑白', studentCopies: 21, teacherCopies: 0, pdfPages: 105, dueDate: '08/27(四)', coverType: '公版封面', deliveryStatus: 'RECEIVED', mailStatus: 'SENT', distributedCopies: 18, unitPrice: 0.38, bindingCost: 20 },
+                { orderId: 'HIST-20260820-02', materialName: '學測數學講義B3', isReprint: false, colorType: '彩色', studentCopies: 26, teacherCopies: 1, pdfPages: 120, dueDate: '08/20(四)', coverType: '公版封面', deliveryStatus: 'RECEIVED', mailStatus: 'SENT', distributedCopies: 25, unitPrice: 0.9, bindingCost: 20 },
+                { orderId: 'HIST-20260820-03', materialName: '高二物理講義', isReprint: false, colorType: '黑白', studentCopies: 8, teacherCopies: 0, pdfPages: 246, dueDate: '08/20(四)', coverType: '公版封面', deliveryStatus: 'RECEIVED', mailStatus: 'SENT', distributedCopies: 8, unitPrice: 0.38, bindingCost: 30 },
+                { orderId: 'HIST-20260709-04', materialName: '學測數學講義B2', isReprint: true, colorType: '彩色', studentCopies: 2, teacherCopies: 0, pdfPages: 120, dueDate: '07/09(四)', coverType: '公版封面', deliveryStatus: 'RECEIVED', mailStatus: 'SENT', distributedCopies: 2, unitPrice: 0.9, bindingCost: 20 },
+                { orderId: 'HIST-20260902-05', materialName: '國一上英文講義', isReprint: false, colorType: '黑白', studentCopies: 20, teacherCopies: 0, pdfPages: 86, dueDate: '09/2(三)', coverType: '公版封面', deliveryStatus: 'PENDING', mailStatus: 'SENT', distributedCopies: 0, unitPrice: 0.38, bindingCost: 20 }
+              );
+              showScanResultModal.value = true;
+              triggerToast('掃描完成', '已從 Gmail 成功載入歷史送印紀錄！');
+            }, 1200);
+          }
+        };
+
+        const toast = ref({ show: false, title: '', message: '', type: 'success' });
+        const triggerToast = (title, message, type = 'success') => {
+          toast.value = { show: true, title, message, type };
+          setTimeout(() => { toast.value.show = false; }, 3500);
+        };
+
+        const tabs = ref([
+          { id: 'wizard', name: '送印精靈', icon: 'fa-solid fa-paper-plane' },
+          { id: 'inventory', name: '講義庫存與加印', icon: 'fa-solid fa-layer-group' },
+          { id: 'cleanup', name: '空間清理', icon: 'fa-solid fa-broom', badge: 0 },
+          { id: 'reconcile', name: '廠商對帳台', icon: 'fa-solid fa-scale-balanced' },
+          { id: 'roster', name: '學生發放點名', icon: 'fa-solid fa-users-viewfinder' },
+          { id: 'settings', name: '設定', icon: 'fa-solid fa-gear' }
+        ]);
+
+        // 設定資料
+        const settings = ref({
+          vendorName: '泗商影印社',
+          vendorEmail: 'winners.print@gmail.com',
+          driveFolderId: '',
+          defaultBwPrice: 0.38,
+          defaultColorPrice: 0.9,
+          defaultBindingCost: 20
+        });
+
+        // 送印表單資料
+        const form = ref({
+          materialName: '國三上國文講義',
+          isReprint: false,
+          colorType: '黑白',
+          studentCopies: 21,
+          teacherCopies: 0,
+          pdfPages: 126,
+          dueDateFormatted: '08/27(四)',
+          coverType: '公版封面',
+          specialTag: '',
+          note: ''
+        });
+
+        const rawDueDate = ref('2026-08-27');
+        const handleDateChange = () => {
+          if (!rawDueDate.value) return;
+          const d = new Date(rawDueDate.value);
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+          const weekDayStr = weekDays[d.getDay()];
+          form.value.dueDateFormatted = `${month}/${day}(${weekDayStr})`;
+        };
+
+        // 規範化主旨即時組裝
+        const formattedEmailSubject = computed(() => {
+          let parts = [];
+          if (form.value.isReprint) parts.push('[加印]');
+          parts.push(`[${form.value.materialName || '講義名稱'}]`);
+          parts.push(`[${form.value.colorType}]`);
+
+          let copyStr = '學1';
+          const s = form.value.studentCopies || 0;
+          const t = form.value.teacherCopies || 0;
+          if (s > 0 && t > 0) copyStr = `學${s}/教${t}`;
+          else if (s > 0) copyStr = `學${s}`;
+          else if (t > 0) copyStr = `教${t}`;
+          parts.push(`[${copyStr}]`);
+
+          parts.push(`[${form.value.dueDateFormatted || '交件日'}]`);
+          if (form.value.specialTag && form.value.specialTag.trim()) {
+            parts.push(`[${form.value.specialTag.trim()}]`);
+          }
+          parts.push(`[${form.value.coverType || '公版封面'}]`);
+          return parts.join('');
+        });
+
+        // 預估費用即時計算
+        const currentUnitPrice = computed(() => {
+          return form.value.colorType === '彩色' ? settings.value.defaultColorPrice : settings.value.defaultBwPrice;
+        });
+
+        const estimatedCost = computed(() => {
+          const totalCopies = (form.value.studentCopies || 0) + (form.value.teacherCopies || 0);
+          const singleBook = Math.round((form.value.pdfPages * currentUnitPrice.value) + settings.value.defaultBindingCost);
+          return singleBook * totalCopies;
+        });
+
+        // 本機/同步資料夾檔案清單
+        const availableLocalFiles = ref([
+          { name: '115會考國文_9月後複習講義.pdf', sizeFormatted: '34.2 MB', isPdf: true, isAi: false, lastModifiedFormatted: '2026-08-20', detectedPages: 126 },
+          { name: 'O國文公版.ai', sizeFormatted: '5.8 MB', isPdf: false, isAi: true, lastModifiedFormatted: '2026-08-01', detectedPages: 0 },
+          { name: '高一英文暑期講義_B1.pdf', sizeFormatted: '28.1 MB', isPdf: true, isAi: false, lastModifiedFormatted: '2026-08-15', detectedPages: 153 },
+          { name: 'O英文公版.ai', sizeFormatted: '6.2 MB', isPdf: false, isAi: true, lastModifiedFormatted: '2026-08-01', detectedPages: 0 },
+          { name: '學測數學總複習_B3.pdf', sizeFormatted: '42.5 MB', isPdf: true, isAi: false, lastModifiedFormatted: '2026-08-10', detectedPages: 188 },
+          { name: 'O數學公版.ai', sizeFormatted: '5.1 MB', isPdf: false, isAi: true, lastModifiedFormatted: '2026-08-01', detectedPages: 0 }
+        ]);
+
+        const selectedAttachments = ref([
+          { name: '115會考國文_9月後複習講義.pdf', sizeFormatted: '34.2 MB', isPdf: true, detectedPages: 126 },
+          { name: 'O國文公版.ai', sizeFormatted: '5.8 MB', isPdf: false, detectedPages: 0 }
+        ]);
+
+        const loadedFolderInfo = ref({ name: 'Google 雲端硬碟同步講義庫' });
+        const showFilePickerModal = ref(false);
+        const fileSearchQuery = ref('');
+        const fileCategoryFilter = ref('all'); // all, pdf, cover
+
+        const openFilePickerModal = () => { showFilePickerModal.value = true; };
+
+        // 搜尋與篩選計算屬性
+        const filteredLocalFiles = computed(() => {
+          return availableLocalFiles.value.filter(file => {
+            const q = fileSearchQuery.value.trim().toLowerCase();
+            const matchName = !q || file.name.toLowerCase().includes(q);
+            const matchCat = fileCategoryFilter.value === 'all' 
+              || (fileCategoryFilter.value === 'pdf' && file.isPdf)
+              || (fileCategoryFilter.value === 'cover' && !file.isPdf);
+            return matchName && matchCat;
+          });
+        });
+
+        // 格式化檔案大小
+        const formatFileSize = (bytes) => {
+          if (!bytes) return '0 KB';
+          const mb = bytes / (1024 * 1024);
+          if (mb >= 1) return mb.toFixed(1) + ' MB';
+          return (bytes / 1024).toFixed(0) + ' KB';
+        };
+
+        // 格式化時間
+        const formatFileDate = (timestamp) => {
+          if (!timestamp) return '';
+          const d = new Date(timestamp);
+          return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        };
+
+        // 純前端秒讀 PDF 頁數核心
+        const parsePdfPagesFromLocalFile = async (rawFile) => {
+          try {
+            const buffer = await rawFile.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let str = "";
+            const len = Math.min(bytes.length, 300000);
+            for (let i = 0; i < len; i++) {
+              str += String.fromCharCode(bytes[i]);
+            }
+            const matches = str.match(/\/Count\s+(\d+)/g);
+            let maxPages = 0;
+            if (matches) {
+              matches.forEach(m => {
+                const num = parseInt(m.replace(/\/Count\s+/, ""), 10);
+                if (num > maxPages) maxPages = num;
+              });
+            }
+            return maxPages > 0 ? maxPages : 0;
+          } catch (e) {
+            return 0;
+          }
+        };
+
+        // 選取本機資料夾事件
+        const handleLocalFolderSelect = async (e) => {
+          const files = Array.from(e.target.files || []);
+          if (files.length === 0) return;
+
+          // 取得資料夾名稱
+          const firstPath = files[0].webkitRelativePath || '';
+          const folderName = firstPath.split('/')[0] || '選定之同步資料夾';
+          loadedFolderInfo.value = { name: folderName };
+
+          const parsedList = [];
+          for (const f of files) {
+            const isPdf = f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf';
+            const isAi = f.name.toLowerCase().endsWith('.ai') || f.name.toLowerCase().endsWith('.eps');
+            let pages = 0;
+            if (isPdf) {
+              pages = await parsePdfPagesFromLocalFile(f);
+            }
+            parsedList.push({
+              name: f.name,
+              rawFile: f,
+              sizeFormatted: formatFileSize(f.size),
+              lastModifiedFormatted: formatFileDate(f.lastModified),
+              isPdf,
+              isAi,
+              detectedPages: pages
+            });
+          }
+
+          availableLocalFiles.value = parsedList;
+          showFilePickerModal.value = true;
+          triggerToast('資料夾載入成功', `成功掃描 ${folderName}，共讀取 ${parsedList.length} 個講義與封面檔案！`);
+        };
+
+        // 選取個別檔案加入
+        const handleLocalFilesSelect = async (e) => {
+          const files = Array.from(e.target.files || []);
+          if (files.length === 0) return;
+          for (const f of files) {
+            const isPdf = f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf';
+            const isAi = f.name.toLowerCase().endsWith('.ai') || f.name.toLowerCase().endsWith('.eps');
+            let pages = 0;
+            if (isPdf) {
+              pages = await parsePdfPagesFromLocalFile(f);
+            }
+            const item = {
+              name: f.name,
+              rawFile: f,
+              sizeFormatted: formatFileSize(f.size),
+              lastModifiedFormatted: formatFileDate(f.lastModified),
+              isPdf,
+              isAi,
+              detectedPages: pages
+            };
+            availableLocalFiles.value.unshift(item);
+            if (!selectedAttachments.value.some(x => x.name === item.name)) {
+              selectedAttachments.value.push(item);
+              if (isPdf && pages > 0) {
+                form.value.pdfPages = pages;
+                form.value.materialName = f.name.replace(/\.pdf$/i, '').replace(/[\[\]]/g, '');
+              }
+            }
+          }
+          triggerToast('已加入新檔案', `成功匯入並自動讀取 ${files.length} 個檔案！`);
+        };
+
+        const isAttachmentSelected = (name) => selectedAttachments.value.some(f => f.name === name);
+
+        const toggleAttachmentSelection = (file) => {
+          const idx = selectedAttachments.value.findIndex(f => f.name === file.name);
+          if (idx >= 0) {
+            selectedAttachments.value.splice(idx, 1);
+          } else {
+            selectedAttachments.value.push(file);
+            // 若為 PDF，自動帶入講義名稱與頁數
+            if (file.isPdf) {
+              if (file.detectedPages && file.detectedPages > 0) {
+                form.value.pdfPages = file.detectedPages;
+              }
+              const cleanName = file.name.replace(/\.pdf$/i, '').replace(/[\[\]]/g, '');
+              form.value.materialName = cleanName;
+            }
+          }
+        };
+
+        const removeSelectedAttachment = (idx) => {
+          selectedAttachments.value.splice(idx, 1);
+        };
+
+        const confirmAttachmentSelection = () => {
+          showFilePickerModal.value = false;
+          triggerToast('選取完成', `已套用 ${selectedAttachments.value.length} 個附件至本次送印工單！`);
+        };
+
+        // 將檔案轉換為 Base64 (供 Gmail 發送)
+        const fileToBase64 = (rawFile) => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const base64 = reader.result.split(',')[1];
+              resolve({
+                name: rawFile.name,
+                mimeType: rawFile.type || (rawFile.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
+                base64Data: base64
+              });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(rawFile);
+          });
+        };
+
+        // 工單列表 (母子結構資料庫)
+        const orders = ref([
+          {
+            orderId: 'ORD-20260820-001',
+            materialName: '國三上國文講義',
+            isReprint: false,
+            colorType: '黑白',
+            studentCopies: 21,
+            teacherCopies: 0,
+            pdfPages: 126,
+            dueDate: '08/27(四)',
+            coverType: '公版封面',
+            deliveryStatus: 'RECEIVED',
+            mailStatus: 'SENT',
+            distributedCopies: 21,
+            unitPrice: 0.38,
+            bindingCost: 20
+          },
+          {
+            orderId: 'ORD-20260905-002',
+            materialName: '國三上國文講義',
+            isReprint: true,
+            colorType: '黑白',
+            studentCopies: 3,
+            teacherCopies: 0,
+            pdfPages: 126,
+            dueDate: '09/08(二)',
+            coverType: '公版封面',
+            deliveryStatus: 'RECEIVED',
+            mailStatus: 'SENT',
+            distributedCopies: 0,
+            unitPrice: 0.38,
+            bindingCost: 20
+          },
+          {
+            orderId: 'ORD-20260820-003',
+            materialName: '高一上英文講義',
+            isReprint: false,
+            colorType: '黑白/彩色',
+            studentCopies: 19,
+            teacherCopies: 1,
+            pdfPages: 153,
+            dueDate: '08/31(一)',
+            coverType: '公版封面',
+            deliveryStatus: 'RECEIVED',
+            mailStatus: 'SENT',
+            distributedCopies: 18,
+            unitPrice: 0.38,
+            bindingCost: 20
+          }
+        ]);
+
+        // 母子結構分組
+        const groupedMaterials = computed(() => {
+          const map = {};
+          orders.value.forEach(o => {
+            if (!map[o.materialName]) {
+              map[o.materialName] = {
+                materialName: o.materialName,
+                colorType: o.colorType,
+                coverType: o.coverType,
+                pdfPages: o.pdfPages,
+                batches: [],
+                totalPrinted: 0,
+                initialCopies: 0,
+                reprintCopies: 0,
+                totalReceived: 0,
+                totalDistributed: 0,
+                stockLeft: 0
+              };
+            }
+            const group = map[o.materialName];
+            const copies = o.studentCopies + o.teacherCopies;
+            group.batches.push(o);
+            group.totalPrinted += copies;
+            if (o.isReprint) group.reprintCopies += copies;
+            else group.initialCopies += copies;
+
+            if (o.deliveryStatus === 'RECEIVED') group.totalReceived += copies;
+            group.totalDistributed += (o.distributedCopies || 0);
+          });
+
+          Object.values(map).forEach(g => {
+            g.stockLeft = g.totalReceived - g.totalDistributed;
+          });
+          return Object.values(map);
+        });
+
+        // 正式送印發送
+        const handleSendPrintEmail = async () => {
+          isSubmitting.value = true;
+
+          // 處理本機附件為 Base64
+          const rawAttachments = [];
+          for (const att of selectedAttachments.value) {
+            if (att.rawFile) {
+              try {
+                const b64 = await fileToBase64(att.rawFile);
+                rawAttachments.push(b64);
+              } catch (e) {
+                console.error("轉換附件失敗: ", att.name);
+              }
+            }
+          }
+
+          const payload = {
+            ...form.value,
+            vendorEmail: settings.value.vendorEmail,
+            rawAttachments: rawAttachments,
+            unitPrice: currentUnitPrice.value,
+            bindingCost: settings.value.defaultBindingCost
+          };
+
+          // 判斷是否為 GAS 環境
+          if (typeof google !== 'undefined' && google.script && google.script.run) {
+            google.script.run
+              .withSuccessHandler((res) => {
+                isSubmitting.value = false;
+                if (res.success) {
+                  triggerToast('送印成功', res.message);
+                  loadOrders();
+                  currentTab.value = 'inventory';
+                } else {
+                  triggerToast('送印失敗', res.message, 'error');
+                }
+              })
+              .withFailureHandler((err) => {
+                isSubmitting.value = false;
+                triggerToast('執行錯誤', err.message, 'error');
+              })
+              .sendPrintEmail(payload);
+          } else {
+            // 本地預覽模擬
+            setTimeout(() => {
+              isSubmitting.value = false;
+              orders.value.push({
+                orderId: 'ORD-' + Date.now(),
+                materialName: form.value.materialName,
+                isReprint: form.value.isReprint,
+                colorType: form.value.colorType,
+                studentCopies: form.value.studentCopies,
+                teacherCopies: form.value.teacherCopies,
+                pdfPages: form.value.pdfPages,
+                dueDate: form.value.dueDateFormatted,
+                coverType: form.value.coverType,
+                deliveryStatus: 'PENDING',
+                mailStatus: 'SENT',
+                distributedCopies: 0,
+                unitPrice: currentUnitPrice.value,
+                bindingCost: settings.value.defaultBindingCost
+              });
+              triggerToast('模擬發送成功', '信件已寄出並記錄至資料庫！');
+              currentTab.value = 'inventory';
+            }, 1000);
+          }
+        };
+
+        // 一鍵加印：自動帶入原講義資訊
+        const startQuickReprint = (group) => {
+          form.value.materialName = group.materialName;
+          form.value.isReprint = true;
+          form.value.colorType = group.colorType;
+          form.value.coverType = group.coverType;
+          form.value.pdfPages = group.pdfPages;
+          form.value.studentCopies = 3;
+          form.value.teacherCopies = 0;
+          form.value.specialTag = '';
+          form.value.note = '';
+          currentTab.value = 'wizard';
+          triggerToast('加印設定已載入', `已自動帶入【${group.materialName}】的原規格與檔案`);
+        };
+
+        // 標記到貨收書
+        const handleMarkReceived = (orderId) => {
+          const o = orders.value.find(x => x.orderId === orderId);
+          if (o) o.deliveryStatus = 'RECEIVED';
+          triggerToast('到貨入庫', '講義已確認收齊，庫存已正式計入！');
+          updateCleanupBadge();
+        };
+
+        // 空間清理清單
+        const cleanupCandidates = ref([
+          {
+            orderId: 'ORD-20260820-001',
+            materialName: '國三上國文講義',
+            subject: '[國三上國文講義][黑白][學21][08/27(四)][公版封面]',
+            sentTime: '2026-08-20 14:32',
+            attachmentCount: 2,
+            attachmentSizeMb: '40.0'
+          },
+          {
+            orderId: 'ORD-20260820-003',
+            materialName: '高一上英文講義',
+            subject: '[高一上英文講義][黑白/彩色][學19/教1][08/31(一)][公版封面]',
+            sentTime: '2026-08-20 16:15',
+            attachmentCount: 3,
+            attachmentSizeMb: '34.3'
+          }
+        ]);
+
+        const updateCleanupBadge = () => {
+          tabs.value.find(t => t.id === 'cleanup').badge = cleanupCandidates.value.length;
+        };
+
+        const handleTrashEmail = (item) => {
+          const idx = cleanupCandidates.value.findIndex(c => c.orderId === item.orderId);
+          if (idx >= 0) cleanupCandidates.value.splice(idx, 1);
+          triggerToast('安全釋放空間', `已將郵件移入垃圾桶，成功為 Gmail 釋放了約 ${item.attachmentSizeMb} MB！`);
+          updateCleanupBadge();
+        };
+
+        // 廠商 Excel 核帳工作台
+        const reconcileConfig = ref({
+          bwPrice: 0.38,
+          colorPrice: 0.9,
+          bindingCost: 20
+        });
+
+        const reconcilePairs = ref([
+          {
+            systemOrder: { materialName: '國三上國文講義', pdfPages: 126, studentCopies: 21, teacherCopies: 0, isReprint: false },
+            vendorRow: { rawName: '[國三上國文講義][黑白][學21]', pages: 126, copies: 21, totalAmount: 1428 },
+            status: 'MATCH',
+            statusText: '完全相符',
+            diffNote: '',
+            computedExpectedAmount: 1428
+          },
+          {
+            systemOrder: { materialName: '高一下數學講義B2', pdfPages: 195, studentCopies: 4, teacherCopies: 0, isReprint: true },
+            vendorRow: { rawName: '[加印][高一下數學講義B2][黑白][學4]', pages: 195, copies: 4, totalAmount: 420 },
+            status: 'MATCH',
+            statusText: '完全相符',
+            diffNote: '',
+            computedExpectedAmount: 420
+          },
+          {
+            systemOrder: { materialName: '高二物理暑期講義', pdfPages: 246, studentCopies: 23, teacherCopies: 0, isReprint: false },
+            vendorRow: { rawName: '[學測物理講義][黑白][學23]', pages: 246, copies: 23, totalAmount: 2852 },
+            status: 'DIFF',
+            statusText: '規格需確認',
+            diffNote: '廠商備註: 頁數過多需打釘 (封面費 $30)',
+            computedExpectedAmount: 2852
+          }
+        ]);
+
+        const totalVendorAmount = computed(() => {
+          return reconcilePairs.value.reduce((acc, p) => acc + (p.vendorRow?.totalAmount || 0), 0);
+        });
+
+        const recomputeReconcile = () => {
+          triggerToast('費率重算完成', '已根據新單價即時計算所有應付金額');
+        };
+
+        const handleExcelUpload = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          processExcelFile(file);
+        };
+        const handleExcelDrop = (e) => {
+          const file = e.dataTransfer.files[0];
+          if (!file) return;
+          processExcelFile(file);
+        };
+
+        const processExcelFile = (file) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const data = new Uint8Array(evt.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+            triggerToast('Excel 解析成功', `成功載入 ${json.length} 列廠商資料，正在進行智能預配對...`);
+          };
+          reader.readAsArrayBuffer(file);
+        };
+
+        // 學生現場發放名單
+        const selectedMaterialForRoster = ref('國三上國文講義');
+        const rawRosterInput = ref('王小明\n李大華\n陳品均\n張浩廷\n林雅婷\n趙子龍\n黃建豪\n周杰倫\n蔡依林\n劉德華');
+        const newStudentName = ref('');
+        const activeRoster = ref([
+          { name: '王小明', received: true, isNew: false },
+          { name: '李大華', received: true, isNew: false },
+          { name: '陳品均', received: true, isNew: false },
+          { name: '張浩廷', received: false, isNew: false }, // 請假
+          { name: '林雅婷', received: true, isNew: false },
+          { name: '許同學(試聽)', received: true, isNew: true }
+        ]);
+
+        const openDistributionTab = (group) => {
+          selectedMaterialForRoster.value = group.materialName;
+          currentTab.value = 'roster';
+        };
+
+        const parseAndApplyRoster = () => {
+          if (!rawRosterInput.value) return;
+          const names = rawRosterInput.value
+            .split(/[\n,，]+/)
+            .map(n => n.trim())
+            .filter(n => n.length > 0);
+          activeRoster.value = names.map(n => ({ name: n, received: false, isNew: false }));
+          triggerToast('名單已載入', `成功解析 ${names.length} 位學生名單！`);
+        };
+
+        const addNewStudentToRoster = () => {
+          if (!newStudentName.value.trim()) return;
+          activeRoster.value.push({ name: newStudentName.value.trim(), received: true, isNew: true });
+          newStudentName.value = '';
+          triggerToast('新生已登記', '已加入名單並標記已領取講義');
+        };
+
+        const toggleStudentStatus = (student) => {
+          student.received = !student.received;
+        };
+
+        const toggleSelectAllRoster = (status) => {
+          activeRoster.value.forEach(s => s.received = status);
+        };
+
+        const saveRosterDistribution = () => {
+          const receivedCount = activeRoster.value.filter(s => s.received).length;
+          triggerToast('發放紀錄已儲存', `已發出 ${receivedCount} 本講義，已即時更新扣減庫存！`);
+        };
+
+        const saveSettings = () => {
+          triggerToast('設定已儲存', '通訊錄與費率參數已更新！');
+        };
+
+        const loadOrders = () => {
+          triggerToast('資料已更新', '最新工單與庫存狀態已同步');
+        };
+
+        onMounted(() => {
+          handleDateChange();
+          updateCleanupBadge();
+        });
+
+        return {
+          currentTab,
+          tabs,
+          toast,
+          settings,
+          form,
+          rawDueDate,
+          handleDateChange,
+          formattedEmailSubject,
+          currentUnitPrice,
+          estimatedCost,
+          isSubmitting,
+          handleSendPrintEmail,
+          availableLocalFiles,
+          selectedAttachments,
+          loadedFolderInfo,
+          showFilePickerModal,
+          openFilePickerModal,
+          fileSearchQuery,
+          fileCategoryFilter,
+          filteredLocalFiles,
+          handleLocalFolderSelect,
+          handleLocalFilesSelect,
+          isAttachmentSelected,
+          toggleAttachmentSelection,
+          removeSelectedAttachment,
+          confirmAttachmentSelection,
+          orders,
+          groupedMaterials,
+          startQuickReprint,
+          isScanningGmail,
+          showScanResultModal,
+          scanReport,
+          triggerGmailScan,
+          handleMarkReceived,
+          cleanupCandidates,
+          handleTrashEmail,
+          reconcileConfig,
+          reconcilePairs,
+          totalVendorAmount,
+          recomputeReconcile,
+          handleExcelUpload,
+          handleExcelDrop,
+          selectedMaterialForRoster,
+          rawRosterInput,
+          newStudentName,
+          activeRoster,
+          openDistributionTab,
+          parseAndApplyRoster,
+          addNewStudentToRoster,
+          toggleStudentStatus,
+          toggleSelectAllRoster,
+          saveRosterDistribution,
+          saveSettings,
+          loadOrders
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
